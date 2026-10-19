@@ -1,0 +1,56 @@
+:root {
+  --font:
+    'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+  --serif:
+    'Iowan Old Style', 'Palatino Linotype', 'Noto Serif CJK SC', 'Microsoft YaHei', Georgia, serif;
+  /* Solarized-inspired paper, slate ink, sea-glass accents and a touch of ochre. */
+  --page: #f5eedb;
+  --sidebar: #eee8d5;
+  --card: #fdf6e3;
+  --ink: #344f57;
+  --muted: #536b70;
+  --primary: #197c78;
+  --on-primary: #fdf6e3;
+  --primary-container: #dce7dc;
+  --primary-ink: #176d68;
+  --line: #dfd7bf;
+  --outline: #b8b7a0;
+  --hover: #f0ecd9;
+  --active-cue: #e8eeda;
+  --chip: #f1ecd9;
+  --focus: #197c78;
+  --selection: #cfe2d8;
+  --collection: #e8dfc2;
+  --collection-ink: #665125;
+  --review: #99680e;
+  --error-container: #f7e2d5;
+  --error-ink: #9b402c;
+  --video-bg: #002b36;
+  --video-ink: #d9e2d5;
+  --video-scrim: #002b36eb;
+  --dialog-shadow: #002b3626;
+}
+:root[data-theme='dark'] {
+  --page: #002b36;
+  --sidebar: #062f39;
+  --card: #073642;
+  --ink: #d4ddd1;
+  --muted: #a2b4b1;
+  --primary: #64beb0;
+  --on-primary: #002b36;
+  --primary-container: #124c51;
+  --primary-ink: #8bd2c0;
+  --line: #234b55;
+  --outline: #44666a;
+  --hover: #123f49;
+  --active-cue: #103f46;
+  --chip: #103e48;
+  --focus: #81c7ba;
+  --selection: #225b60;
+  --collection: #133f44;
+  --collection-ink: #d6c393;
+  --review: #d6ae55;
+  --error-container: #4a3030;
+  --error-ink: #f3b6a4;
+  --dialog-shadow: #00182066;
+}

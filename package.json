@@ -1,0 +1,32 @@
+{
+  "name": "listening-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.21.0 <25"
+  },
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "check": "vue-tsc --noEmit && eslint . && node --check server/library.mjs && node --check server/dictionary.mjs && prettier --check .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@lucide/vue": "1.59.0",
+    "vue": "3.5.44",
+    "vuetify": "3.13.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "@vitejs/plugin-vue": "6.0.10",
+    "eslint": "10.13.0",
+    "eslint-plugin-vue": "10.11.1",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.2",
+    "vite": "8.3.4",
+    "vue-tsc": "3.3.13"
+  }
+}

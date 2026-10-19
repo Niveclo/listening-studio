@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "title": { "zh": "我的视频库", "en": "My library" },
+  "episodes": [
+    {
+      "id": "lesson-01",
+      "title": { "zh": "第一课", "en": "Lesson one" },
+      "description": { "zh": "点击字幕，开始精听。", "en": "Listen a little closer." },
+      "videoPath": "D:/Videos/lesson.mp4",
+      "subtitlePath": "D:/Subtitles/lesson.en.srt",
+      "poster": ""
+    }
+  ]
+}
