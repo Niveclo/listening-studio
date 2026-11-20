@@ -1,22 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useTheme } from 'vuetify';
 import {
-  AudioLines,
-  BookOpen,
-  Check,
   ChevronDown,
-  ChevronRight,
+  Ellipsis,
   FolderOpen,
-  Headphones,
+  Import,
   Languages,
-  Leaf,
-  ListVideo,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
+  PanelLeft,
   Pause,
   Play,
   RefreshCw,
@@ -26,9 +18,6 @@ import {
   SkipForward,
   Sun,
   Video,
-  VideoOff,
-  Volume2,
-  Wifi,
   X,
 } from '@lucide/vue';
 import type { Cue, Episode, Locale, SubtitleMode, ThemeMode } from './types';
@@ -39,6 +28,7 @@ import { usePlayer } from './composables/usePlayer';
 import { useSidebars } from './composables/useSidebars';
 import TranscriptPanel from './components/TranscriptPanel.vue';
 import DictionaryDialog from './components/DictionaryDialog.vue';
+import EpisodeList from './components/EpisodeList.vue';
 
 const storedLocale = readStored<string>('locale', 'zh');
 const locale = ref<Locale>(storedLocale === 'en' ? 'en' : 'zh');
@@ -56,10 +46,21 @@ const subtitleMode = ref<SubtitleMode>(
 const theme = useTheme();
 const t = (key: MessageKey) => message(locale.value, key);
 const episodes = ref<Episode[]>([]);
+const localIds = new Set<string>();
 const activeId = ref('');
 const active = computed(() => episodes.value.find((episode) => episode.id === activeId.value));
 const activeOrder = computed(
   () => episodes.value.findIndex((episode) => episode.id === activeId.value) + 1,
+);
+const episodeTitle = computed(() => {
+  if (!active.value) return t('brand');
+  if (localIds.has(active.value.id)) return active.value.title[locale.value];
+  const number =
+    locale.value === 'zh' ? `第 ${activeOrder.value} 集` : `Episode ${activeOrder.value}`;
+  return `${number} · ${active.value.title[locale.value]}`;
+});
+const episodeItems = computed(() =>
+  episodes.value.map((episode) => ({ episode, status: statusLabel(episode) })),
 );
 const cues = ref<Cue[]>([]);
 const loading = ref(false);
@@ -67,15 +68,17 @@ const libraryLoading = ref(false);
 const libraryFailed = ref(false);
 const subtitlesFailed = ref(false);
 const videoFailed = ref(false);
+const canPlay = computed(() => !!active.value?.videoAvailable && !videoFailed.value);
 const toastKey = ref<MessageKey | null>(null);
 const settingsOpen = ref(false);
 const libraryOpen = ref(false);
-const mobileVideoOpen = ref(false);
+const menuOpen = ref(false);
 const dictionaryOpen = ref(false);
 const dictionaryWord = ref('');
 const {
   shell,
   shellStyle,
+  compact,
   widths: sidebarWidths,
   minWidth: sidebarMinWidth,
   maxWidth: sidebarMaxWidth,
@@ -90,9 +93,8 @@ const subtitleInput = ref<HTMLInputElement | null>(null);
 const videoInput = ref<HTMLInputElement | null>(null);
 const transcriptPanel = ref<InstanceType<typeof TranscriptPanel> | null>(null);
 const video = ref<HTMLVideoElement | null>(null);
-const importedCues = new Map<string, Cue[]>();
+const importedCues = reactive(new Map<string, Cue[]>());
 const localUrls: string[] = [];
-const localIds = new Set<string>();
 const savedOffset = readStored('offset', 0);
 const offset = ref(
   typeof savedOffset === 'number' && Number.isFinite(savedOffset)
@@ -103,6 +105,7 @@ const player = usePlayer(video, cues, activeId, offset, () => {
   toastKey.value = 'playbackError';
 });
 const { time, duration, paused, rate, loopCue, activeIndex, anchorIndex } = player;
+const progress = computed(() => (duration.value ? (time.value / duration.value) * 100 : 0));
 const rates = [0.5, 0.75, 0.9, 1, 1.25, 1.5, 1.75, 2];
 let subtitleRequest: AbortController | null = null;
 let libraryRequest: AbortController | null = null;
@@ -243,8 +246,13 @@ function openVideo(event: Event) {
   selectEpisode(episode);
 }
 
-function followCurrent() {
-  void transcriptPanel.value?.followCurrent();
+function toggleLibrary() {
+  if (compact.value) libraryOpen.value = !libraryOpen.value;
+  else toggleSidebar('left');
+}
+
+function focusLibraryToggle() {
+  document.getElementById('library-toggle')?.focus({ preventScroll: true });
 }
 
 function openDictionary(word: string) {
@@ -261,12 +269,14 @@ function keydown(event: KeyboardEvent) {
     event.altKey ||
     settingsOpen.value ||
     libraryOpen.value ||
+    menuOpen.value ||
     dictionaryOpen.value
   )
     return;
   if (
-    (event.target as HTMLElement).closest(
-      'input, textarea, select, button, video, [contenteditable="true"], [role="button"], [role="menu"], [role="dialog"]',
+    event.target instanceof Element &&
+    event.target.closest(
+      'input, textarea, select, button, video, [contenteditable="true"], [role="button"], [role="menu"], [role="listbox"], [role="dialog"]',
     )
   )
     return;
@@ -302,13 +312,15 @@ watch(
   (value) => {
     theme.change(value);
     document.documentElement.dataset.theme = value;
-    document
-      .querySelector('meta[name="theme-color"]')
-      ?.setAttribute('content', value === 'dark' ? '#002b36' : '#f5eedb');
+    const pageColor = getComputedStyle(document.documentElement).getPropertyValue('--page').trim();
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', pageColor);
     writeStored('theme', value);
   },
   { immediate: true },
 );
+watch(compact, (value) => {
+  if (!value) libraryOpen.value = false;
+});
 watch(subtitleMode, (value) => writeStored('subtitleMode', value));
 watch(offset, (value) => {
   if (!Number.isFinite(value)) {
@@ -340,109 +352,111 @@ onBeforeUnmount(() => {
       ref="shell"
       class="studio-shell"
       :class="{
+        'is-compact': compact,
         'left-collapsed': sidebarsCollapsed.left,
         'right-collapsed': sidebarsCollapsed.right,
         'is-resizing': resizingSidebar !== null,
       }"
       :style="shellStyle"
     >
-      <aside id="library-panel" class="library-panel" :aria-label="t('library')">
-        <a class="brand" href="#" @click.prevent="followCurrent">
-          <span class="brand-mark"><AudioLines :size="25" :stroke-width="1.7" /></span>
-          <span class="brand-name">
-            {{ t('brand') }}
-            <span v-if="locale === 'zh'" class="brand-english">LISTENING STUDIO</span>
-          </span>
-        </a>
+      <header class="studio-header">
+        <v-btn
+          id="library-toggle"
+          variant="text"
+          class="header-button"
+          :class="{ 'is-open': !compact && !sidebarsCollapsed.left }"
+          :aria-label="
+            t(compact ? 'library' : sidebarsCollapsed.left ? 'expandLibrary' : 'collapseLibrary')
+          "
+          :aria-expanded="compact ? libraryOpen : !sidebarsCollapsed.left"
+          :aria-controls="compact ? undefined : 'library-panel'"
+          :aria-haspopup="compact ? 'dialog' : undefined"
+          :title="t('library')"
+          @click="toggleLibrary"
+        >
+          <PanelLeft :size="18" aria-hidden="true" />
+          <span>{{ t('library') }}</span>
+        </v-btn>
+        <div class="episode-heading">
+          <span v-if="active" class="episode-collection">{{ active.collection[locale] }}</span>
+          <h1 :title="episodeTitle">{{ episodeTitle }}</h1>
+        </div>
+        <v-btn
+          variant="text"
+          class="header-button"
+          :class="{ 'is-open': !sidebarsCollapsed.right }"
+          :aria-label="t(sidebarsCollapsed.right ? 'showVideo' : 'hideVideo')"
+          :aria-expanded="!sidebarsCollapsed.right"
+          aria-controls="video-panel"
+          :title="t(sidebarsCollapsed.right ? 'showVideo' : 'hideVideo')"
+          @click="toggleSidebar('right')"
+        >
+          <Video :size="18" aria-hidden="true" />
+          <span>{{ t('video') }}</span>
+        </v-btn>
+        <v-menu v-model="menuOpen" location="bottom end">
+          <template #activator="{ props: menuProps }">
+            <v-btn
+              v-bind="menuProps"
+              variant="text"
+              class="icon-button"
+              :aria-label="t('menu')"
+              :title="t('menu')"
+            >
+              <Ellipsis :size="18" aria-hidden="true" />
+            </v-btn>
+          </template>
+          <v-list density="compact" class="studio-menu">
+            <v-list-item @click="videoInput?.click()">
+              <template #prepend><FolderOpen :size="18" aria-hidden="true" /></template>
+              <template #title>{{ t('importVideo') }}</template>
+            </v-list-item>
+            <v-list-item :disabled="!active" @click="subtitleInput?.click()">
+              <template #prepend><Import :size="18" aria-hidden="true" /></template>
+              <template #title>{{ t('importSubtitle') }}</template>
+            </v-list-item>
+            <v-list-item @click="settingsOpen = true">
+              <template #prepend><Settings2 :size="18" aria-hidden="true" /></template>
+              <template #title>{{ t('settings') }}</template>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+      </header>
+
+      <aside
+        v-show="!compact && !sidebarsCollapsed.left"
+        id="library-panel"
+        class="library-panel"
+        :aria-label="t('library')"
+      >
         <div class="library-heading">
-          <span>{{ t('localLibrary') }}</span>
+          <h2>{{ t('library') }}</h2>
           <v-btn
             variant="text"
-            class="icon-button small"
+            class="icon-button"
             :loading="libraryLoading"
             :aria-label="t('refresh')"
             :title="t('refresh')"
             @click="refreshLibrary"
           >
-            <RefreshCw :size="16" />
+            <RefreshCw :size="18" aria-hidden="true" />
           </v-btn>
         </div>
-        <div class="collection-art">
-          <Leaf :size="36" :stroke-width="1" />
-          <span>{{ active?.collection[locale] || t('library') }}</span>
-          <small>{{ String(episodes.length).padStart(2, '0') }} {{ t('episodes') }}</small>
-        </div>
-        <nav class="episode-list" :aria-label="t('chooseEpisode')">
-          <button
-            v-for="(episode, index) in episodes"
-            :key="episode.id"
-            class="episode-button"
-            :class="{ selected: episode.id === activeId }"
-            :aria-current="episode.id === activeId ? 'true' : undefined"
-            @click="selectEpisode(episode)"
-          >
-            <span class="episode-number">
-              <AudioLines v-if="episode.id === activeId && !paused" :size="17" />
-              <span v-else>{{ String(index + 1).padStart(2, '0') }}</span>
-            </span>
-            <span class="episode-info">
-              <strong>{{ episode.title[locale] }}</strong>
-              <small :class="{ ready: episode.subtitleStatus === 'ready' }">
-                <span v-if="episode.subtitleStatus === 'ready'" class="status-dot"></span>
-                {{ t(statusLabel(episode)) }}
-              </small>
-            </span>
-            <ChevronRight v-if="episode.id === activeId" :size="16" />
-          </button>
-        </nav>
-        <div class="library-bottom">
-          <nav class="sidebar-actions" :aria-label="t('menu')">
-            <v-btn
-              variant="text"
-              class="language-button"
-              :aria-label="t('language')"
-              :title="t('language')"
-              @click="locale = locale === 'zh' ? 'en' : 'zh'"
-            >
-              <Languages :size="19" />
-              <span>{{ locale === 'zh' ? 'EN' : '中文' }}</span>
-            </v-btn>
-            <v-btn
-              variant="text"
-              class="icon-button"
-              :aria-label="t(themeMode === 'light' ? 'dark' : 'light')"
-              :title="t(themeMode === 'light' ? 'dark' : 'light')"
-              @click="themeMode = themeMode === 'light' ? 'dark' : 'light'"
-            >
-              <Moon v-if="themeMode === 'light'" :size="20" />
-              <Sun v-else :size="20" />
-            </v-btn>
-            <v-btn
-              variant="text"
-              class="icon-button"
-              :aria-label="t('settings')"
-              :title="t('settings')"
-              @click="settingsOpen = true"
-            >
-              <Settings2 :size="20" />
-            </v-btn>
-          </nav>
-          <v-btn variant="outlined" block class="open-video-button" @click="videoInput?.click()">
-            <FolderOpen :size="17" />
-            {{ t('importVideo') }}
-          </v-btn>
-          <p>{{ t('importHint') }}</p>
-          <div class="local-badge">
-            <Wifi :size="14" />
-            <span>{{ t('local') }}</span>
-            <span class="status-dot"></span>
-          </div>
-        </div>
+        <EpisodeList
+          :items="episodeItems"
+          :active-id="activeId"
+          :locale="locale"
+          @select="selectEpisode"
+        />
+        <v-btn variant="text" class="library-open-video" @click="videoInput?.click()">
+          <FolderOpen :size="18" aria-hidden="true" />
+          {{ t('importVideo') }}
+        </v-btn>
       </aside>
 
       <div
         v-for="side in ['left', 'right'] as const"
-        v-show="!sidebarsCollapsed[side]"
+        v-show="!compact && !sidebarsCollapsed[side]"
         :key="side"
         class="sidebar-resizer"
         :class="[side, { 'is-active': resizingSidebar === side }]"
@@ -450,8 +464,8 @@ onBeforeUnmount(() => {
         aria-orientation="vertical"
         :aria-label="t(side === 'left' ? 'resizeLibrary' : 'resizeVideo')"
         :aria-controls="side === 'left' ? 'library-panel' : 'video-panel'"
-        :aria-valuemin="sidebarMinWidth"
-        :aria-valuemax="sidebarMaxWidth"
+        :aria-valuemin="sidebarMinWidth[side]"
+        :aria-valuemax="sidebarMaxWidth[side]"
         :aria-valuenow="sidebarWidths[side]"
         :title="t('resizeSidebarHint')"
         tabindex="0"
@@ -468,52 +482,6 @@ onBeforeUnmount(() => {
         <div v-if="videoFailed" class="error-banner" role="alert">
           {{ t('videoError') }}
         </div>
-        <section class="episode-intro">
-          <v-btn
-            variant="text"
-            class="icon-button sidebar-toggle"
-            :aria-label="t(sidebarsCollapsed.left ? 'expandLibrary' : 'collapseLibrary')"
-            :title="t(sidebarsCollapsed.left ? 'expandLibrary' : 'collapseLibrary')"
-            :aria-expanded="!sidebarsCollapsed.left"
-            aria-controls="library-panel"
-            @click="toggleSidebar('left')"
-          >
-            <PanelLeftOpen v-if="sidebarsCollapsed.left" :size="20" />
-            <PanelLeftClose v-else :size="20" />
-          </v-btn>
-          <div class="episode-heading">
-            <div class="eyebrow">
-              <Headphones :size="13" />
-              {{ t('listening') }}
-              <span class="eyebrow-divider">/</span>
-              {{ active?.collection[locale] || t('library') }}
-            </div>
-            <h1>
-              <span class="title-index">{{ String(activeOrder).padStart(2, '0') }}</span>
-              {{ active?.title[locale] || t('firstVideo') }}
-              <span v-if="active && locale === 'zh'" class="title-translation">
-                {{ active.title.en }}
-              </span>
-            </h1>
-          </div>
-          <div class="lesson-badge">
-            <BookOpen :size="16" />
-            <span>{{ t('nowPlaying') }}</span>
-          </div>
-          <v-btn
-            variant="text"
-            class="icon-button sidebar-toggle"
-            :aria-label="t(sidebarsCollapsed.right ? 'expandVideo' : 'collapseVideo')"
-            :title="t(sidebarsCollapsed.right ? 'expandVideo' : 'collapseVideo')"
-            :aria-expanded="!sidebarsCollapsed.right"
-            aria-controls="video-panel"
-            @click="toggleSidebar('right')"
-          >
-            <PanelRightOpen v-if="sidebarsCollapsed.right" :size="20" />
-            <PanelRightClose v-else :size="20" />
-          </v-btn>
-        </section>
-
         <TranscriptPanel
           ref="transcriptPanel"
           v-model:subtitle-mode="subtitleMode"
@@ -521,14 +489,15 @@ onBeforeUnmount(() => {
           :active-index="activeIndex"
           :anchor-index="anchorIndex"
           :loop-id="loopCue?.id"
-          :paused="paused"
           :locale="locale"
-          :loading="loading"
+          :loading="loading || (libraryLoading && !active)"
           :subtitles-failed="subtitlesFailed"
           :processing="active?.subtitleStatus === 'processing'"
           :can-import="!!active"
+          :can-play="canPlay"
           @jump="player.jumpTo"
           @import="subtitleInput?.click()"
+          @open-video="videoInput?.click()"
           @refresh="refreshLibrary"
           @lookup="openDictionary"
         />
@@ -537,16 +506,10 @@ onBeforeUnmount(() => {
       <aside
         id="video-panel"
         class="video-sidebar"
-        :class="{ 'mobile-video-open': mobileVideoOpen }"
+        :aria-hidden="sidebarsCollapsed.right"
+        :inert="sidebarsCollapsed.right"
         :aria-label="t('video')"
       >
-        <div class="video-heading">
-          <span>
-            <Video :size="16" />
-            {{ t('video') }}
-          </span>
-          <span class="video-secondary-label">{{ t('nowPlaying') }}</span>
-        </div>
         <!-- Keep one media element mounted so collapsing the picture preserves audio and position. -->
         <div class="video-frame">
           <video
@@ -568,28 +531,14 @@ onBeforeUnmount(() => {
             @error="videoFailed = true"
             @ratechange="rate = video?.playbackRate || 1"
           ></video>
-          <div
-            v-if="videoFailed || !active?.videoAvailable"
-            class="video-message"
-            :role="videoFailed ? 'alert' : undefined"
-          >
-            <Volume2 :size="30" />
-            <p>{{ active ? t('videoError') : t('firstVideo') }}</p>
-            <v-btn v-if="!active" color="primary" @click="videoInput?.click()">
-              {{ t('importVideo') }}
-            </v-btn>
+          <div v-if="!canPlay" class="video-message">
+            {{ t('videoMissing') }}
           </div>
         </div>
-
-        <div class="video-details">
-          <span class="eyebrow">{{ active?.collection[locale] || t('library') }}</span>
-          <h2>{{ active?.title[locale] || t('firstVideo') }}</h2>
-          <p v-if="active?.description[locale]">{{ active.description[locale] }}</p>
-          <div class="listening-note">
-            <Headphones :size="20" :stroke-width="1.5" />
-            <p>{{ t('listenFirst') }}</p>
-          </div>
-        </div>
+        <details v-if="active?.description[locale]" class="video-details">
+          <summary>{{ t('videoDetails') }}</summary>
+          <p>{{ active.description[locale] }}</p>
+        </details>
       </aside>
 
       <section class="playback-dock" :aria-label="t('playback')">
@@ -602,6 +551,7 @@ onBeforeUnmount(() => {
             :max="duration || 0"
             step="0.1"
             :value="time"
+            :style="{ '--progress': `${progress}%` }"
             :disabled="!duration"
             :aria-label="t('seek')"
             :aria-valuetext="formatTime(time) + ' / ' + formatTime(duration)"
@@ -614,7 +564,7 @@ onBeforeUnmount(() => {
             <v-btn
               variant="text"
               class="icon-button"
-              :disabled="!cues.length || !duration"
+              :disabled="!canPlay || !cues.length || !duration"
               :aria-label="t('previous')"
               :title="t('previous') + ' ['"
               @click="player.adjacent(-1)"
@@ -624,7 +574,7 @@ onBeforeUnmount(() => {
             <v-btn
               color="primary"
               class="play-button"
-              :disabled="!active?.videoAvailable"
+              :disabled="!canPlay"
               :aria-label="t(paused ? 'play' : 'pause')"
               :title="t(paused ? 'play' : 'pause')"
               @click="player.togglePlay"
@@ -635,7 +585,7 @@ onBeforeUnmount(() => {
             <v-btn
               variant="text"
               class="icon-button"
-              :disabled="!cues.length || !duration"
+              :disabled="!canPlay || !cues.length || !duration"
               :aria-label="t('next')"
               :title="t('next') + ' ]'"
               @click="player.adjacent(1)"
@@ -668,7 +618,7 @@ onBeforeUnmount(() => {
               :variant="loopCue ? 'tonal' : 'text'"
               :color="loopCue ? 'primary' : undefined"
               class="loop-button"
-              :disabled="!cues.length || !duration"
+              :disabled="!canPlay || !cues.length || !duration"
               :aria-pressed="!!loopCue"
               :aria-label="t('loop')"
               :title="t('loop') + ' · L'"
@@ -679,28 +629,6 @@ onBeforeUnmount(() => {
             </v-btn>
           </div>
         </div>
-
-        <nav class="mobile-navigation" :aria-label="t('menu')">
-          <v-btn variant="text" @click="libraryOpen = true">
-            <ListVideo :size="20" />
-            <span>{{ t('library') }}</span>
-          </v-btn>
-          <v-btn
-            :variant="mobileVideoOpen ? 'tonal' : 'text'"
-            :color="mobileVideoOpen ? 'primary' : undefined"
-            :aria-expanded="mobileVideoOpen"
-            aria-controls="video-panel"
-            @click="mobileVideoOpen = !mobileVideoOpen"
-          >
-            <VideoOff v-if="mobileVideoOpen" :size="20" />
-            <Video v-else :size="20" />
-            <span>{{ t(mobileVideoOpen ? 'hideVideo' : 'showVideo') }}</span>
-          </v-btn>
-          <v-btn variant="text" @click="settingsOpen = true">
-            <Settings2 :size="20" />
-            <span>{{ t('settings') }}</span>
-          </v-btn>
-        </nav>
       </section>
     </div>
 
@@ -727,11 +655,17 @@ onBeforeUnmount(() => {
       v-model="dictionaryOpen"
       :word="dictionaryWord"
       :locale="locale"
+      @after-leave="transcriptPanel?.focusTranscript()"
       @pronounce="video?.pause()"
     />
 
-    <v-dialog v-model="libraryOpen" max-width="440" scrollable :aria-label="t('chooseEpisode')">
-      <div class="settings-card">
+    <v-dialog
+      v-model="libraryOpen"
+      max-width="440"
+      :aria-label="t('chooseEpisode')"
+      @after-leave="focusLibraryToggle"
+    >
+      <div class="settings-card library-dialog">
         <div class="dialog-heading">
           <h2>{{ t('chooseEpisode') }}</h2>
           <v-btn
@@ -743,22 +677,12 @@ onBeforeUnmount(() => {
             <X :size="20" />
           </v-btn>
         </div>
-        <nav class="dialog-episode-list">
-          <button
-            v-for="(episode, index) in episodes"
-            :key="episode.id"
-            class="episode-button"
-            :class="{ selected: episode.id === activeId }"
-            @click="selectEpisode(episode)"
-          >
-            <span class="episode-number">{{ String(index + 1).padStart(2, '0') }}</span>
-            <span class="episode-info">
-              <strong>{{ episode.title[locale] }}</strong>
-              <small>{{ t(statusLabel(episode)) }}</small>
-            </span>
-            <Check v-if="activeId === episode.id" :size="18" />
-          </button>
-        </nav>
+        <EpisodeList
+          :items="episodeItems"
+          :active-id="activeId"
+          :locale="locale"
+          @select="selectEpisode"
+        />
         <div class="dialog-actions">
           <v-btn variant="text" :loading="libraryLoading" @click="refreshLibrary">
             <RefreshCw :size="16" />
@@ -791,25 +715,14 @@ onBeforeUnmount(() => {
           </v-btn>
         </div>
         <div class="appearance-settings">
-          <v-btn
-            variant="text"
-            class="language-button"
-            :aria-label="t('language')"
-            :title="t('language')"
-            @click="locale = locale === 'zh' ? 'en' : 'zh'"
-          >
-            <Languages :size="19" />
-            <span>{{ locale === 'zh' ? 'EN' : '中文' }}</span>
+          <v-btn variant="outlined" @click="locale = locale === 'zh' ? 'en' : 'zh'">
+            <Languages :size="18" aria-hidden="true" />
+            <span>{{ t('language') }}</span>
           </v-btn>
-          <v-btn
-            variant="text"
-            class="icon-button"
-            :aria-label="t(themeMode === 'light' ? 'dark' : 'light')"
-            :title="t(themeMode === 'light' ? 'dark' : 'light')"
-            @click="themeMode = themeMode === 'light' ? 'dark' : 'light'"
-          >
-            <Moon v-if="themeMode === 'light'" :size="20" />
-            <Sun v-else :size="20" />
+          <v-btn variant="outlined" @click="themeMode = themeMode === 'light' ? 'dark' : 'light'">
+            <Moon v-if="themeMode === 'light'" :size="18" aria-hidden="true" />
+            <Sun v-else :size="18" aria-hidden="true" />
+            <span>{{ t(themeMode === 'light' ? 'dark' : 'light') }}</span>
           </v-btn>
         </div>
         <label class="offset-label" for="subtitle-offset">
@@ -852,6 +765,7 @@ onBeforeUnmount(() => {
             <kbd>L</kbd>
           </div>
         </div>
+        <p class="setting-hint">{{ t('dictionaryHint') }}</p>
         <p class="source-note">{{ t('sourceNote') }}</p>
         <div class="dialog-actions">
           <v-btn color="primary" @click="settingsOpen = false">{{ t('close') }}</v-btn>

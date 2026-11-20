@@ -2,6 +2,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { readStored, writeStored } from '../lib/storage';
 
 type Side = 'left' | 'right';
+const compactWidth = 900;
+
 interface SidebarPreferences {
   widths: Record<Side, number | null>;
   collapsed: Record<Side, boolean>;
@@ -11,21 +13,29 @@ export function useSidebars() {
   const saved = readStored<Partial<SidebarPreferences> | null>('sidebars', null);
   const shell = ref<HTMLElement | null>(null);
   const availableWidth = ref(document.documentElement.clientWidth);
+  const compact = computed(() => availableWidth.value <= compactWidth);
   const requestedWidths = ref<Record<Side, number | null>>({
     left: storedWidth(saved?.widths?.left) ?? 230,
     right: storedWidth(saved?.widths?.right),
   });
   const collapsed = ref<Record<Side, boolean>>({
-    left: saved?.collapsed?.left === true,
-    right: saved?.collapsed?.right === true,
+    left: saved?.collapsed?.left !== false,
+    right: saved?.collapsed?.right !== false,
   });
   const resizing = ref<Side | null>(null);
-  const maxWidth = computed(() => Math.floor(availableWidth.value * 0.25));
-  const minWidth = computed(() => Math.min(200, maxWidth.value));
+  const maxWidth = computed(() => ({
+    left: Math.floor(availableWidth.value * 0.25),
+    right: Math.floor(availableWidth.value * 0.4),
+  }));
+  const minWidth = computed(() => ({
+    left: Math.min(200, maxWidth.value.left),
+    right: Math.min(240, maxWidth.value.right),
+  }));
   const widths = computed(() => ({
-    left: clampWidth(requestedWidths.value.left ?? 230),
+    left: clampWidth('left', requestedWidths.value.left ?? 230),
     right: clampWidth(
-      requestedWidths.value.right ?? Math.min(380, Math.max(260, availableWidth.value * 0.24)),
+      'right',
+      requestedWidths.value.right ?? Math.min(520, availableWidth.value * 0.34),
     ),
   }));
   const shellStyle = computed(() => ({
@@ -45,8 +55,8 @@ export function useSidebars() {
     return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
   }
 
-  function clampWidth(value: number) {
-    return Math.round(Math.max(minWidth.value, Math.min(maxWidth.value, value)));
+  function clampWidth(side: Side, value: number) {
+    return Math.round(Math.max(minWidth.value[side], Math.min(maxWidth.value[side], value)));
   }
 
   function savePreferences() {
@@ -64,7 +74,7 @@ export function useSidebars() {
   }
 
   function startResize(side: Side, event: PointerEvent) {
-    if (event.button !== 0 || collapsed.value[side] || availableWidth.value <= 900) return;
+    if (event.button !== 0 || collapsed.value[side] || compact.value) return;
     finishResize();
     event.preventDefault();
     const handle = event.currentTarget as HTMLElement;
@@ -86,7 +96,7 @@ export function useSidebars() {
       return;
     }
     const delta = (event.clientX - drag.startX) * (drag.side === 'left' ? 1 : -1);
-    requestedWidths.value[drag.side] = clampWidth(drag.startWidth + delta);
+    requestedWidths.value[drag.side] = clampWidth(drag.side, drag.startWidth + delta);
   }
 
   function endResize(event: PointerEvent) {
@@ -100,10 +110,10 @@ export function useSidebars() {
     const direction = (event.key === 'ArrowRight' ? 1 : -1) * (side === 'left' ? 1 : -1);
     requestedWidths.value[side] =
       event.key === 'Home'
-        ? minWidth.value
+        ? minWidth.value[side]
         : event.key === 'End'
-          ? maxWidth.value
-          : clampWidth(widths.value[side] + direction * step);
+          ? maxWidth.value[side]
+          : clampWidth(side, widths.value[side] + direction * step);
     savePreferences();
   }
 
@@ -137,6 +147,7 @@ export function useSidebars() {
   return {
     shell,
     shellStyle,
+    compact,
     widths,
     minWidth,
     maxWidth,

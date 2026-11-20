@@ -174,15 +174,9 @@ onBeforeUnmount(() => {
   <v-dialog v-model="open" class="dictionary-dialog" max-width="560" :aria-label="t('dictionary')">
     <article class="dictionary-card">
       <div class="dictionary-heading">
-        <div>
-          <span class="eyebrow">
-            <BookOpen :size="14" />
-            {{ t('dictionary') }}
-          </span>
-          <h2 lang="en">{{ entry?.word || word }}</h2>
-        </div>
+        <h2 lang="en">{{ entry?.word || word }}</h2>
         <v-btn variant="text" class="icon-button" :aria-label="t('close')" @click="open = false">
-          <X :size="21" />
+          <X :size="18" aria-hidden="true" />
         </v-btn>
       </div>
       <div class="dictionary-body" aria-live="polite" :aria-busy="loading">
